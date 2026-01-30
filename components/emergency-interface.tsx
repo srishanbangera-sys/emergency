@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import SimplePeer from 'simple-peer';
 import { AlertCircle, Phone, MapPin, User, Video, XCircle, Mic, MicOff, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -63,7 +62,7 @@ export default function EmergencyInterface() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const peerRef = useRef<any>(null);
+  const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   // Get user location on mount
@@ -142,31 +141,53 @@ export default function EmergencyInterface() {
     }, 2000);
   };
 
-  // Initialize WebRTC peer connection
+  // Initialize WebRTC peer connection using native API
   const initializeWebRTC = () => {
-    const peer = new SimplePeer({
-      initiator: true,
-      trickleIce: true,
-      stream: localStreamRef.current || undefined,
-      streams: [localStreamRef.current!],
-    });
+    try {
+      const configuration = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      };
 
-    peer.on('signal', (data) => {
-      console.log('WebRTC signal:', data);
-    });
+      const peerConnection = new RTCPeerConnection(configuration);
 
-    peer.on('stream', (stream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
+      // Add local stream tracks to the peer connection
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, localStreamRef.current!);
+        });
       }
-    });
 
-    peer.on('error', (err) => {
-      console.error('WebRTC error:', err);
-      setStatus('Video call error: ' + err.message);
-    });
+      // Handle incoming remote stream
+      peerConnection.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
 
-    peerRef.current = peer;
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('ICE candidate:', event.candidate);
+        }
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'connected') {
+          setStatus('Video call connected');
+        } else if (peerConnection.connectionState === 'failed') {
+          setStatus('Video call connection failed');
+        }
+      };
+
+      peerRef.current = peerConnection;
+      setStatus('Video call ready - waiting for doctor...');
+    } catch (err) {
+      console.error('WebRTC initialization error:', err);
+      setStatus('Video call initialization failed');
+    }
   };
 
   // Toggle video
@@ -194,10 +215,12 @@ export default function EmergencyInterface() {
   // End call
   const handleEndCall = () => {
     if (peerRef.current) {
-      peerRef.current.destroy();
+      peerRef.current.close();
+      peerRef.current = null;
     }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
     }
     setCallActive(false);
     setDoctorName(null);
