@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  emergency-response:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+      - "5000:5000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:5000
+      - FRONTEND_URL=http://localhost:3000
+      - SOCKET_IO_URL=http://localhost:5000
+      - DATABASE_URL= mongodb://localhost:27017/medical_records
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    restart: unless-stopped
+
+  # Optional: PostgreSQL Database
+  # db:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: emergency_system
+  #     POSTGRES_USER: admin
+  #     POSTGRES_PASSWORD: password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   postgres_data:
