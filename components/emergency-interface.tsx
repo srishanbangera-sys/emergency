@@ -1,17 +1,9 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import SimplePeer from 'simple-peer';
 import { AlertCircle, Phone, MapPin, User, Video, XCircle, Mic, MicOff, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import dynamic from 'next/dynamic';
-
-// Dynamically import the map component to avoid SSR issues with leaflet
-const EmergencyMap = dynamic(() => import('./emergency-map'), {
-  ssr: false,
-  loading: () => <div className="w-full h-96 bg-slate-700 rounded flex items-center justify-center text-slate-300">Loading map...</div>,
-});
 
 // Mock data for doctors and ambulances
 const MOCK_DOCTORS: Doctor[] = [
@@ -63,7 +55,6 @@ export default function EmergencyInterface() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const peerRef = useRef<any>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   // Get user location on mount
@@ -142,31 +133,12 @@ export default function EmergencyInterface() {
     }, 2000);
   };
 
-  // Initialize WebRTC peer connection
+  // Simulate WebRTC connection (demo mode)
   const initializeWebRTC = () => {
-    const peer = new SimplePeer({
-      initiator: true,
-      trickleIce: true,
-      stream: localStreamRef.current || undefined,
-      streams: [localStreamRef.current!],
-    });
-
-    peer.on('signal', (data) => {
-      console.log('WebRTC signal:', data);
-    });
-
-    peer.on('stream', (stream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
-      }
-    });
-
-    peer.on('error', (err) => {
-      console.error('WebRTC error:', err);
-      setStatus('Video call error: ' + err.message);
-    });
-
-    peerRef.current = peer;
+    // In a real application, this would establish a WebRTC connection
+    // For demo purposes, we simulate the connection
+    console.log('Simulating video call connection...');
+    setStatus('Video call connected (demo mode)');
   };
 
   // Toggle video
@@ -193,9 +165,6 @@ export default function EmergencyInterface() {
 
   // End call
   const handleEndCall = () => {
-    if (peerRef.current) {
-      peerRef.current.destroy();
-    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
@@ -391,12 +360,28 @@ export default function EmergencyInterface() {
               {/* Map Section */}
               <Card className="p-0 overflow-hidden border border-slate-700 bg-slate-800 h-96 rounded-xl">
                 {userLocation && (
-                  <EmergencyMap
-                    userLocation={userLocation}
-                    doctors={doctors}
-                    ambulances={ambulances}
-                    emergencyReported={emergencyReported}
-                  />
+                  <div className="w-full h-full relative">
+                    {/* Static Map using OpenStreetMap tiles */}
+                    <img
+                      src={`https://staticmap.openstreetmap.de/staticmap.php?center=${userLocation.latitude},${userLocation.longitude}&zoom=13&size=400x400&maptype=osmarenderer&markers=${userLocation.latitude},${userLocation.longitude},ol-marker`}
+                      alt="Emergency location map"
+                      className="w-full h-full object-cover"
+                      crossOrigin="anonymous"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" />
+                    <div className="absolute bottom-4 left-4 right-4">
+                      <div className="bg-slate-900/80 backdrop-blur rounded-lg p-3">
+                        <p className="text-xs text-slate-400 mb-1">Your Location</p>
+                        <p className="text-sm font-mono text-cyan-400">
+                          {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
+                        </p>
+                        <div className="flex items-center gap-4 mt-2 text-xs">
+                          <span className="text-green-400">{doctors.length} doctors nearby</span>
+                          <span className="text-amber-400">{ambulances.length} ambulances</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </Card>
             </div>
