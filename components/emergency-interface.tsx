@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertCircle, Phone, MapPin, User, Video, XCircle, Mic, MicOff, VideoOff } from 'lucide-react';
+import { AlertCircle, Phone, MapPin, User, Video, XCircle, Mic, MicOff, VideoOff, MessageSquare, Send } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import dynamic from 'next/dynamic';
@@ -47,6 +49,15 @@ export interface Ambulance {
   status: string;
 }
 
+interface ChatMessage {
+  id: string;
+  sender: 'doctor' | 'patient';
+  text: string;
+  timestamp: Date;
+  type: 'text' | 'instruction';
+  instructionKey?: string;
+}
+
 export default function EmergencyInterface() {
   const [userLocation, setUserLocation] = useState<EmergencyLocation | null>(null);
   const [emergencyReported, setEmergencyReported] = useState(false);
@@ -59,11 +70,53 @@ export default function EmergencyInterface() {
   const [status, setStatus] = useState('Ready');
   const [searching, setSearching] = useState(false);
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [callSessionId, setCallSessionId] = useState<string | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+    const socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      const userId = `user_${Date.now()}`;
+      socket.emit('user:register', { userId });
+      setStatus('Connected to emergency services');
+    });
+
+    socket.on('chat:message', (data: { message: ChatMessage }) => {
+      setChatMessages((prev) => [...prev, { ...data.message, timestamp: new Date(data.message.timestamp) }]);
+    });
+
+    socket.on('doctor:joined', (data) => {
+      setStatus(`${data.doctorName} has joined the call`);
+    });
+
+    socket.on('call:ended', () => {
+      handleEndCall();
+    });
+
+    socketRef.current = socket;
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   // Get user location on mount
   useEffect(() => {
@@ -132,6 +185,10 @@ export default function EmergencyInterface() {
     setSearching(true);
     setStatus(`Calling Dr. ${doctor.name}...`);
     setDoctorName(doctor.name);
+
+    // Generate a call session ID for chat
+    const sessionId = `call_${Date.now()}`;
+    setCallSessionId(sessionId);
 
     // Simulate doctor accepting call
     setTimeout(() => {
@@ -212,6 +269,26 @@ export default function EmergencyInterface() {
     }
   };
 
+  // Send chat message
+  const sendMessage = () => {
+    if (!messageInput.trim() || !callSessionId) return;
+
+    const message: ChatMessage = {
+      id: `msg_${Date.now()}`,
+      sender: 'patient',
+      text: messageInput,
+      timestamp: new Date(),
+      type: 'text',
+    };
+
+    setChatMessages((prev) => [...prev, message]);
+    socketRef.current?.emit('chat:message', {
+      callSessionId,
+      message,
+    });
+    setMessageInput('');
+  };
+
   // End call
   const handleEndCall = () => {
     if (peerRef.current) {
@@ -222,21 +299,35 @@ export default function EmergencyInterface() {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+    if (callSessionId) {
+      socketRef.current?.emit('call:end', { callSessionId });
+    }
     setCallActive(false);
     setDoctorName(null);
     setEmergencyReported(false);
     setSearching(false);
     setStatus('Call ended');
     setSelectedDoctor(null);
+    setChatMessages([]);
+    setCallSessionId(null);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-orange-500 mb-2">Emergency Response System</h1>
-          <p className="text-slate-400">Real-time emergency medical dispatch with doctor consultation</p>
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl md:text-5xl font-bold text-orange-500 mb-2">Emergency Response System</h1>
+            <p className="text-slate-400">Real-time emergency medical dispatch with doctor consultation</p>
+          </div>
+          <a
+            href="/doctor"
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <User className="w-4 h-4" />
+            Doctor Portal
+          </a>
         </div>
 
         {/* Main Content */}
@@ -368,6 +459,59 @@ export default function EmergencyInterface() {
                         className="bg-red-600 hover:bg-red-700 rounded-full w-12 h-12 p-0"
                       >
                         <XCircle className="w-5 h-5" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {/* Chat Section Below Video */}
+                  <div className="p-4 bg-slate-800 border-t border-slate-700">
+                    <div className="flex items-center gap-2 mb-3">
+                      <MessageSquare className="w-4 h-4 text-cyan-400" />
+                      <h4 className="font-semibold text-sm">Doctor Instructions</h4>
+                    </div>
+                    <ScrollArea className="h-32 mb-3">
+                      <div className="space-y-2 pr-4">
+                        {chatMessages.length > 0 ? (
+                          chatMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex ${msg.sender === 'patient' ? 'justify-end' : 'justify-start'}`}
+                            >
+                              <div
+                                className={`max-w-[85%] p-2 rounded-lg text-sm ${
+                                  msg.sender === 'patient'
+                                    ? 'bg-cyan-600 text-white'
+                                    : msg.type === 'instruction'
+                                    ? 'bg-green-700 text-white'
+                                    : 'bg-slate-700 text-slate-200'
+                                }`}
+                              >
+                                <p className="whitespace-pre-wrap">{msg.text}</p>
+                                <p className="text-xs opacity-70 mt-1">
+                                  {msg.timestamp.toLocaleTimeString()}
+                                </p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-slate-500 text-sm text-center py-4">
+                            Chat messages from the doctor will appear here
+                          </p>
+                        )}
+                        <div ref={chatEndRef} />
+                      </div>
+                    </ScrollArea>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={messageInput}
+                        onChange={(e) => setMessageInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                        placeholder="Type a message to the doctor..."
+                        className="flex-1 bg-slate-700 border-none rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                      <Button onClick={sendMessage} size="sm" className="bg-cyan-600 hover:bg-cyan-700">
+                        <Send className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>

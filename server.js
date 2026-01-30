@@ -302,6 +302,24 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Chat messages between doctor and patient
+  socket.on('chat:message', (data) => {
+    const { callSessionId, message } = data;
+    const callSession = callSessions.get(callSessionId);
+
+    if (callSession) {
+      // Send message to the other party
+      if (message.sender === 'doctor') {
+        io.to(`user_${callSession.userId}`).emit('chat:message', { message });
+      } else {
+        const doctor = doctors.get(callSession.doctorId);
+        if (doctor && doctor.socketId) {
+          io.to(doctor.socketId).emit('chat:message', { message });
+        }
+      }
+    }
+  });
+
   // End call
   socket.on('call:end', (data) => {
     const { callSessionId } = data;
